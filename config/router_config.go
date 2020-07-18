@@ -22,22 +22,44 @@ import (
 )
 
 import (
+	"github.com/apache/dubbo-go/cluster/router"
 	"github.com/apache/dubbo-go/cluster/directory"
 	"github.com/apache/dubbo-go/common/extension"
 	"github.com/apache/dubbo-go/common/logger"
 	"github.com/apache/dubbo-go/common/yaml"
 )
 
+// LocalRouterRules defines the local file router configuration struct
+type LocalRouterRules struct {
+	RouterRules []interface{} `yaml:"routerRules"`
+}
+
 // RouterInit Load config file to init router config
 func RouterInit(confRouterFile string) error {
-	fileRouterFactories := extension.GetFileRouterFactories()
 	bytes, err := yaml.LoadYMLConfig(confRouterFile)
 	if err != nil {
 		return perrors.Errorf("ioutil.ReadFile(file:%s) = error:%v", confRouterFile, perrors.WithStack(err))
 	}
-	logger.Warnf("get fileRouterFactories len{%+v})", len(fileRouterFactories))
-	for k, factory := range fileRouterFactories {
-		r, e := factory.NewFileRouter(bytes)
+	routerRules := &LocalRouterRules{}
+	err = yaml.UnmarshalYML(bytes, routerRules)
+	if err != nil {
+		return perrors.Errorf("Load router file %s failed due to error: %v", confRouterFile, perrors.WithStack(err))
+	}
+	if len(routerRules.RouterRules) == 0 {
+		return perrors.Errorf("No router configurations in file %s", confRouterFile)
+	}
+	fileRouterFactories := extension.GetFileRouterFactories()
+	for _, v := range routerRules.RouterRules {
+		content, _ := yaml.MarshalYML(v)
+		err = initRouterConfig(content, fileRouterFactories)
+	}
+	return err
+}
+
+func initRouterConfig (content []byte,factories map[string]router.FilePriorityRouterFactory) error {
+	logger.Warnf("get fileRouterFactories len{%+v})", len(factories))
+	for k, factory := range factories {
+		r, e := factory.NewFileRouter(content)
 		if e == nil {
 			url := r.URL()
 			directory.AddRouterURLSet(&url)
@@ -45,5 +67,5 @@ func RouterInit(confRouterFile string) error {
 		}
 		logger.Warnf("router config type %s create fail {%v}\n", k, e)
 	}
-	return perrors.Errorf("no file router exists for parse %s , implement router.FIleRouterFactory please.", confRouterFile)
+	return perrors.Errorf("no file router exists to parse %s , please implement router.FileRouterFactory.", confRouterFile)
 }
